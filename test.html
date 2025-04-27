@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <script src="https://api.map.baidu.com/api?v=3.0&ak=你的AK&callback=initMap"></script>
+  <style>
+    #map { height: 500px; width: 100%; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <script>
+    function initMap() {
+      const map = new BMap.Map('map');
+      map.centerAndZoom(new BMap.Point(116.404, 39.915), 15); // 北京坐标
+    }
+  </script>
+</body>
+</html>
