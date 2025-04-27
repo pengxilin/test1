@@ -1,28 +1,346 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <!-- 修正1: 使用标准JavaScript API（v3.0），非WebGL -->
-  <script src="https://api.map.baidu.com/api?v=3.0&ak=Zhn1mx9j0DN2kJerodG3meJXHFGRMOKv&callback=initMap"></script>
-  <style>
-    #map { height: 500px; width: 100%; }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body, html, #bdmap {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+
+        #controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 1000;
+            background-color: white;
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+        }
+
+        #start-input {
+            padding: 8px;
+            margin-bottom: 10px;
+            width: 250px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+
+        #search-start-btn {
+            padding: 10px 15px;
+            margin-right: 10px;
+            background-color: #f8f9fa;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        #search-start-btn:hover {
+            background-color: #e9ecef;
+        }
+        
+        #countdown {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            background-color: white;
+            padding: 10px 15px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+            font-weight: bold;
+            display: none;
+        }
+        
+        .person-marker {
+            width: 32px;
+            height: 32px;
+            background-image: url('https://cdn-icons-png.flaticon.com/512/3135/3135715.png');
+            background-size: contain;
+            background-repeat: no-repeat;
+            position: absolute;
+            transform: translate(-50%, -100%);
+        }
+    </style>
+    <title>自行车导航地图</title>
+    <script src="https://api.map.baidu.com/api?type=webgl&v=1.0&ak=Zhn1mx9j0DN2kJerodG3meJXHFGRMOKv"></script>
 </head>
 <body>
-  <div id="map"></div>
-  <script>
-    // 修正2: 添加回调函数确保API加载完成
-    function initMap() {
-      // 修正3: 检查BMap是否加载成功
-      if (typeof BMap !== 'undefined') {
-        const map = new BMap.Map('map');
-        const point = new BMap.Point(116.404, 39.915); // 北京坐标
-        map.centerAndZoom(point, 15);
-        map.enableScrollWheelZoom(true); // 启用滚轮缩放
-      } else {
-        console.error("百度地图API加载失败，请检查AK和网络！");
-      }
-    }
-  </script>
+    <div id="controls">
+        <input type="text" id="start-input" placeholder="输入起点地址或坐标（如：福建农林大学或119.237532,26.083072）">
+        <button id="search-start-btn">搜索起点</button>
+    </div>
+    <div id="countdown">将在 <span id="timer">60</span> 秒后跳转</div>
+    <div id="bdmap"></div>
+
+    <script>
+        // 创建地图实例
+        let map = new BMapGL.Map("bdmap");
+
+        // 将地图中心点设置为福建农林大学的位置
+        const fafuCenter = new BMapGL.Point(119.248, 26.0886);
+        map.centerAndZoom(fafuCenter, 18); // 初始化地图，设置中心点坐标和地图级别
+        map.enableScrollWheelZoom(true); // 开启鼠标滚轮缩放
+
+        // 10辆自行车的位置数据，每辆车有唯一ID
+        const bikePositions = [
+            { id: "Bike001", lng: 119.248, lat: 26.0886 },
+            { id: "Bike002", lng: 119.237, lat: 26.0887 },
+            { id: "Bike003", lng: 119.237, lat: 26.0888 },
+            { id: "Bike004", lng: 119.246, lat: 26.0882 },
+            { id: "Bike005", lng: 119.247, lat: 26.0890 },
+            { id: "Bike006", lng: 119.245, lat: 26.0872 },
+            { id: "Bike007", lng: 119.24, lat: 26.0872 },
+            { id: "Bike008", lng: 119.24, lat: 26.0872 },
+            { id: "Bike009", lng: 119.24, lat: 26.0872 },
+            { id: "Bike010", lng: 119.24, lat: 26.0872 }
+        ];
+
+        let bikeMarkers = []; // 保存所有自行车标记
+        let drivingRoute = null; // 保存导航路线对象
+        let startMarker = null; // 保存起点标记
+        let currentStartPoint = null; // 保存当前起点坐标
+        let personMarker = null; // 人物标记
+        let countdownInterval = null; // 倒计时定时器
+        let animationInterval = null; // 动画定时器
+
+        // 创建自行车图标
+        function createBikeIcon() {
+            return new BMapGL.Icon(
+                "https://c-ssl.duitang.com/uploads/blog/202202/19/20220219152259_06898.jpeg",
+                new BMapGL.Size(50, 50),
+                {
+                    anchor: new BMapGL.Size(16, 32),
+                    imageOffset: new BMapGL.Size(0, 0)
+                }
+            );
+        }
+
+        let bikeIcon = createBikeIcon(); // 创建自行车图标
+
+        // 初始化地图时显示所有自行车
+        function initBikeMarkers() {
+            // 清除已有的自行车标记
+            bikeMarkers.forEach(marker => map.removeOverlay(marker));
+            bikeMarkers = [];
+            
+            // 添加所有自行车标记
+            bikePositions.forEach(bike => {
+                const bikePoint = new BMapGL.Point(bike.lng, bike.lat);
+                const marker = new BMapGL.Marker(bikePoint, { 
+                    icon: bikeIcon,
+                    title: bike.id
+                });
+                
+                // 添加点击事件，点击自行车开始导航
+                marker.addEventListener("click", function() {
+                    if (!currentStartPoint) {
+                        alert('请先设置起点位置');
+                        return;
+                    }
+                    navigateToBike(bikePoint, bike.id);
+                });
+                
+                map.addOverlay(marker);
+                bikeMarkers.push(marker);
+            });
+        }
+
+        // 搜索起点位置
+        function searchStartPoint() {
+            const address = document.getElementById('start-input').value.trim();
+            if (!address) {
+                alert('请输入起点地址或坐标');
+                return;
+            }
+
+            // 清除旧的起点标记
+            if (startMarker) {
+                map.removeOverlay(startMarker);
+                startMarker = null;
+            }
+
+            // 尝试解析为坐标
+            const coordMatch = address.match(/^(-?\d+\.\d+),\s*(-?\d+\.\d+)$/);
+            if (coordMatch && coordMatch.length === 3) {
+                const lng = parseFloat(coordMatch[1]);
+                const lat = parseFloat(coordMatch[2]);
+                currentStartPoint = new BMapGL.Point(lng, lat);
+                addStartMarker(currentStartPoint, address);
+                return;
+            }
+
+            // 否则进行地理编码
+            const localSearch = new BMapGL.LocalSearch(map, {
+                onSearchComplete: function(results) {
+                    if (localSearch.getStatus() === BMAP_STATUS_SUCCESS) {
+                        const point = results.getPoi(0).point;
+                        currentStartPoint = point;
+                        addStartMarker(point, address);
+                    } else {
+                        alert('未找到该地点，请检查输入是否正确');
+                    }
+                }
+            });
+            localSearch.search(address);
+        }
+
+        // 添加起点标记（使用百度默认的红点）
+        function addStartMarker(point, address) {
+            startMarker = new BMapGL.Marker(point);
+            map.addOverlay(startMarker);
+            
+            // 添加信息窗口
+            const infoWindow = new BMapGL.InfoWindow(`起点: ${address}`);
+            startMarker.addEventListener("click", function() {
+                this.openInfoWindow(infoWindow);
+            });
+            
+            map.panTo(point);
+        }
+
+        // 创建人物标记
+        function createPersonMarker(point) {
+            if (personMarker) {
+                map.removeOverlay(personMarker);
+            }
+            
+            personMarker = new BMapGL.Marker(point, {
+                icon: new BMapGL.Icon(
+                    'https://cdn-icons-png.flaticon.com/512/3135/3135715.png',
+                    new BMapGL.Size(32, 32),
+                    {
+                        anchor: new BMapGL.Size(16, 32)
+                    }
+                )
+            });
+            map.addOverlay(personMarker);
+        }
+
+        // 导航到选中的自行车位置
+        function navigateToBike(bikePoint, bikeId) {
+            if (!currentStartPoint) {
+                alert('请先设置起点位置');
+                return;
+            }
+
+            // 清除旧的导航路线和人物标记
+            if (drivingRoute) {
+                drivingRoute.clearResults();
+                map.removeOverlay(drivingRoute);
+            }
+            if (personMarker) {
+                map.removeOverlay(personMarker);
+                personMarker = null;
+            }
+            clearInterval(animationInterval);
+            clearInterval(countdownInterval);
+            document.getElementById('countdown').style.display = 'none';
+
+            // 创建驾车导航实例
+            drivingRoute = new BMapGL.DrivingRoute(map, {
+                renderOptions: { map: map, autoViewport: true },
+                onSearchComplete: function(results) {
+                    if (drivingRoute.getStatus() === BMAP_STATUS_SUCCESS) {
+                        // 获取路线点
+                        const plan = results.getPlan(0);
+                        const routePoints = [];
+                        
+                        // 收集路线上的点（步长为5）
+                        for (let i = 0; i < plan.getNumRoutes(); i++) {
+                            const route = plan.getRoute(i);
+                            const points = route.getPath();
+                            
+                            // 每隔5个点取一个点
+                            for (let j = 0; j < points.length; j += 5) {
+                                routePoints.push(points[j]);
+                            }
+                        }
+                        
+                        // 开始动画
+                        startAnimation(routePoints, bikePoint, bikeId);
+                    }
+                }
+            });
+
+            // 设置起点和终点
+            drivingRoute.search(currentStartPoint, bikePoint);
+        }
+        
+        // 开始动画
+        function startAnimation(routePoints, bikePoint, bikeId) {
+            if (routePoints.length === 0) return;
+            
+            // 创建人物标记
+            createPersonMarker(routePoints[0]);
+            
+            let currentIndex = 0;
+            const totalSteps = routePoints.length;
+            let countdown = 60;
+            
+            // 显示倒计时
+            document.getElementById('countdown').style.display = 'block';
+            document.getElementById('timer').textContent = countdown;
+            
+            // 开始倒计时
+            countdownInterval = setInterval(() => {
+                countdown--;
+                document.getElementById('timer').textContent = countdown;
+                
+                if (countdown <= 0) {
+    clearInterval(countdownInterval);
+    window.location.href = 'https://pengxilin.github.io/test1/bike16.html';
+}
+
+            }, 1000);
+            
+            // 开始移动动画
+            animationInterval = setInterval(() => {
+                currentIndex++;
+                
+                if (currentIndex >= routePoints.length) {
+                    // 到达自行车位置
+                    clearInterval(animationInterval);
+                    clearInterval(countdownInterval);
+                    document.getElementById('countdown').style.display = 'none';
+                    
+                    // 显示到达信息
+                    alert(`已到达自行车 ${bikeId} 位置！即将跳转到订单页面...`);
+                    
+                    // 跳转到订单页面
+                    // 修改跳转部分，将 bikeId 作为参数传递
+                    setTimeout(() => {
+                        window.location.href = `https://pengxilin.github.io/test1/bike16.html?bikeId=${encodeURIComponent(bikeId)}`;
+                    }, 2000);
+                    return;
+                }
+                
+                // 移动人物到下一个点
+                const nextPoint = routePoints[currentIndex];
+                personMarker.setPosition(nextPoint);
+                
+                // 更新地图中心
+                map.panTo(nextPoint);
+                
+            }, 1000); // 每秒移动一步
+        }
+
+        // 初始化自行车标记
+        initBikeMarkers();
+
+        // 绑定按钮点击事件
+        document.getElementById("search-start-btn").addEventListener("click", searchStartPoint);
+        
+        // 按回车键搜索起点
+        document.getElementById("start-input").addEventListener("keypress", function(e) {
+            if (e.key === "Enter") {
+                searchStartPoint();
+            }
+        });
+    </script>
 </body>
 </html>
