@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>福州共享单车还车系统</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            font-size: 16px;
+            line-height: 1.5;
+            background-color: #f5f5f5;
+            padding: 15px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            padding: 20px;
+            margin: 0 auto;
+            max-width: 500px;
+        }
+
+        h2 {
+            color: #333;
+            font-size: 1.5rem;
+            margin-bottom: 1.5rem;
+            text-align: center;
+        }
+
+        button {
+            width: 100%;
+            background: #06c755;
+            color: white;
+            padding: 16px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1.1rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        button:disabled {
+            background: #b0b0b0;
+            cursor: not-allowed;
+            opacity: 0.7;
+        }
+
+        .status {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            text-align: center;
+            line-height: 1.4;
+        }
+
+        .success {
+            background: #e8f5e9;
+            color: #2e7d32;
+            border: 1px solid #c8e6c9;
+        }
+
+        .error {
+            background: #ffebee;
+            color: #c62828;
+            border: 1px solid #ffcdd2;
+        }
+
+        /* 移动端优化 */
+        @media (max-width: 480px) {
+            body {
+                padding: 10px;
+            }
+
+            .container {
+                padding: 15px;
+                border-radius: 10px;
+            }
+
+            button {
+                padding: 14px;
+                font-size: 1rem;
+            }
+        }
+
+        /* 加载动画 */
+        .loader {
+            width: 18px;
+            height: 18px;
+            border: 3px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        /* 地图容器样式 */
+        .map-container {
+            height: 70vh;
+            margin: -15px -15px 15px -15px;
+            border-radius: 12px 12px 0 0;
+            overflow: hidden;
+        }
+        #map {
+            height: 100%;
+        }
+    </style>
+    <script type="text/javascript" src="https://api.map.baidu.com/api?v=3.0&ak=SAeNdtEtaQs5pqV4iL8CxCNKptpuuGZr"></script>
+</head>
+<body>
+<div class="container">
+    <div class="map-container">
+        <div id="map"></div>
+    </div>
+    <h2>🚲 确认还车</h2>
+    <button onclick="handleReturn()" id="returnBtn">
+        <span>确认还车</span>
+    </button>
+    <div id="statusMessage" class="status"></div>
+</div>
+
+<script>
+    // 百度地图初始化
+    let map = null;
+    let geolocation = null;
+
+    // 从URL获取骑行时间（单位：分钟）
+const urlParams = new URLSearchParams(window.location.search);
+const new_time = parseInt(urlParams.get('time')) || 0;
+
+// 参数验证
+if(!urlParams.has('lat') || !urlParams.has('lng')) {
+    document.getElementById('statusMessage').className = 'status error';
+    document.getElementById('statusMessage').innerHTML = '❌ 缺少位置信息<br>请重新结束骑行操作';
+    document.getElementById('returnBtn').disabled = true;
+    throw new Error('Missing location parameters');
+}
+
+// 解析坐标参数
+const endPoint = {
+    lat: parseFloat(urlParams.get('lat')),
+    lng: parseFloat(urlParams.get('lng'))
+};
+
+// 计算金额（2元起步价 + 0.2元/分钟）
+const new_amount = 2 + new_time * 0.2;
+
+const rideData = {
+    time: new_time,
+    amount: new_amount.toFixed(2),
+    bikeId: 'FZ123'
+};
+
+
+
+    function initMap() {
+        map = new BMap.Map('map');
+        const point = new BMap.Point(119.296389, 26.074268); // 福州中心坐标
+        map.centerAndZoom(point, 13);
+        map.enableScrollWheelZoom(true);
+        map.addControl(new BMap.NavigationControl());
+
+        geolocation = new BMap.Geolocation();
+
+        // 还车点标记
+    const endMarker = new BMap.Marker(new BMap.Point(endPoint.lng, endPoint.lat));
+    endMarker.setLabel(new BMap.Label("还车位置",{offset: new BMap.Size(15,-10)}));
+    map.addOverlay(endMarker);
+
+    // 地理围栏显示
+    const boundsPoints = [
+        new BMap.Point(fuzhouBounds.minLng, fuzhouBounds.minLat),
+        new BMap.Point(fuzhouBounds.maxLng, fuzhouBounds.minLat),
+        new BMap.Point(fuzhouBounds.maxLng, fuzhouBounds.maxLat),
+        new BMap.Point(fuzhouBounds.minLng, fuzhouBounds.maxLat)
+    ];
+    const boundary = new BMap.Polygon(boundsPoints, {
+        strokeColor: "#ff0000",
+        fillColor: "#ff0000",
+        strokeOpacity: 0.5,
+        fillOpacity: 0.1
+    });
+    map.addOverlay(boundary);
+
+    // 自动定位到还车点
+    map.centerAndZoom(new BMap.Point(endPoint.lng, endPoint.lat), 15);
+    }
+
+    // 福州地理围栏（简化多边形范围）
+    const fuzhouBounds = {
+        minLng: 119.20,
+        maxLng: 119.40,
+        minLat: 25.90,
+        maxLat: 26.20
+    };
+
+
+    // 多边形验证
+function isInFuzhou(lng, lat) {
+    // 福州大致多边形范围
+    const fuzhouArea = [
+        [119.06, 26.28],  // 北峰
+        [119.42, 26.28],  // 马尾
+        [119.45, 25.82],  // 南屿
+        [119.18, 25.72],  // 南通
+        [118.98, 25.88]   // 闽侯
+    ];
+
+    // 射线法判断点是否在多边形内
+    let inside = false;
+    for (let i = 0, j = fuzhouArea.length - 1; i < fuzhouArea.length; j = i++) {
+        const xi = fuzhouArea[i][0], yi = fuzhouArea[i][1];
+        const xj = fuzhouArea[j][0], yj = fuzhouArea[j][1];
+
+        const intersect = ((yi > lat) !== (yj > lat)) &&
+            (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi);
+        if (intersect) inside = !inside;
+    }
+    return inside;
+}
+
+    // ReturnManager 实现
+    const ReturnManager = {
+    confirmReturn: async function() {
+        console.log('还车坐标：', endPoint);
+        return isInFuzhou(endPoint.lng, endPoint.lat);
+    }
+};
+
+    // 处理还车操作
+    async function handleReturn() {
+        const btn = document.getElementById('returnBtn');
+        const statusDiv = document.getElementById('statusMessage');
+        const btnText = btn.querySelector('span');
+
+        btn.disabled = true;
+        btnText.textContent = '正在验证位置...';
+        btn.insertAdjacentHTML('beforeend', '<div class="loader"></div>');
+        statusDiv.className = 'status';
+        statusDiv.innerHTML = '';
+
+        try {
+            const result = await ReturnManager.confirmReturn();
+
+            if(result) {
+                statusDiv.className = 'status success';
+                statusDiv.innerHTML = '✅ 还车成功！<br>正在为您跳转支付...';
+                setTimeout(() => {
+      window.location.href = `payment.html?${new URLSearchParams(rideData).toString()}`;
+}, 2000);
+            } else {
+                statusDiv.className = 'status error';
+                statusDiv.innerHTML = '❌ 当前不在福州范围内<br>请在规定区域内还车';
+            }
+        } catch (error) {
+            statusDiv.className = 'status error';
+            statusDiv.innerHTML = `⚠️ ${error.message}<br>请开启定位权限后重试`;
+        } finally {
+            btn.disabled = false;
+            btnText.textContent = '确认还车';
+            btn.querySelector('.loader')?.remove();
+        }
+    }
+
+    // 初始化地图
+    initMap();
+</script>
+</body>
+</html>
