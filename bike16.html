@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>共享单车骑行状态 - 福州</title>
+    <script type="text/javascript" src="https://api.map.baidu.com/api?v=2.0&ak=YfGEslRFYjqQVQvAODYYsxCMXtypceT9"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 20px auto;
+            padding: 20px;
+            background-color: #f0f2f5;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            padding: 25px;
+        }
+        
+        .status-card {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+        
+        .metric {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        
+        .metric h3 {
+            color: #666;
+            margin: 0 0 8px 0;
+            font-size: 14px;
+        }
+        
+        .metric .value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #2d3436;
+        }
+        
+        .unit {
+            font-size: 12px;
+            color: #888;
+            margin-left: 2px;
+        }
+        
+        #ride-map {
+            height: 350px;
+            border-radius: 8px;
+            margin: 20px 0;
+            border: 1px solid #ddd;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            margin-top: 15px;
+            flex-wrap: wrap;
+        }
+        
+        button {
+            padding: 12px 25px;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s;
+            margin: 5px;
+        }
+        
+        #startBtn {
+            background: #00b894;
+            color: white;
+        }
+        
+        #startBtn:disabled {
+            background: #b2bec3;
+            cursor: not-allowed;
+        }
+        
+        #endBtn {
+            background: #ff7675;
+            color: white;
+        }
+        
+        #historyBtn {
+            background: #74b9ff;
+            color: white;
+        }
+        
+        #clearHistoryBtn {
+            background: #fdcb6e;
+            color: white;
+        }
+        
+        .param-row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        
+        .param-row label {
+            margin-right: 5px;
+            font-weight: bold;
+            font-size: 14px;
+        }
+        
+        #speedBike {
+            width: 60px;
+            padding: 5px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+        }
+        
+        .dark-mode {
+            background-color: #1e1e2e !important;
+            color: #f0f0f0 !important;
+        }
+        
+        .dark-mode .container {
+            background: #2d2d42 !important;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3) !important;
+        }
+        
+        .dark-mode .metric {
+            background: #3a3a5a !important;
+        }
+        
+        .dark-mode .value {
+            color: #ffffff !important;
+        }
+        .custom-alert {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 0 10px rgba(0,0,0,0.2);
+        z-index: 1000;
+        display: none;
+    }
+    .dark-mode .custom-alert {
+        background: #3a3a5a;
+        color: white;
+    }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="status-card">
+            <div class="metric">
+                <h3>骑行时长</h3>
+                <div><span id="duration" class="value">0</span><span class="unit">秒</span></div>
+            </div>
+            <div class="metric">
+                <h3>行驶距离</h3>
+                <div><span id="distance" class="value">0.00</span><span class="unit">米</span></div>
+            </div>
+            <div class="metric">
+                <h3>当前速度</h3>
+                <div><span id="speed" class="value">0.00</span><span class="unit">m/s</span></div>
+            </div>
+            <div class="metric">
+                <h3>实时位置</h3>
+                <div id="location" class="value">26.0745, 119.2964</div>
+            </div>
+        </div>
+        <div class="custom-alert" id="customAlert">
+            <div id="alertContent"></div>
+            <button onclick="document.getElementById('customAlert').style.display='none'" 
+                    style="margin-top:15px;padding:8px 16px;">
+                确定
+            </button>
+        </div>
+        <div id="ride-map"></div>
+
+        <div class="param-row">
+            <label><input id="follow" type="checkbox" checked> 画面跟随</label>
+            <span>：</span>
+            <input type="number" id="speedBike" value="50" min="20" max="200" step="10">
+            <select id="mapMode">
+                <option value="normal">标准模式</option>
+                <option value="satellite">卫星模式</option>
+                <option value="traffic">路况模式</option>
+            </select>
+            <button id="toggleMapBtn">切换地图</button>
+            <button id="toggleThemeBtn">切换主题</button>
+        </div>
+
+        <div class="controls">
+            <button id="startBtn" onclick="startRide()">开始骑行</button>
+            <button id="endBtn" onclick="endRide()" disabled>结束骑行</button>
+            <button id="returnBtn" onclick="returnBike()" disabled>前往还车</button>
+            <button id="historyBtn" onclick="showRideHistory()" disabled>骑行历史</button>
+            <button id="clearHistoryBtn" onclick="clearRideHistory()" disabled>清除记录</button>
+            <button id="exportBtn" onclick="exportRideData()" disabled>导出数据</button>
+        </div>
+    </div>
+
+    <script>
+        // 百度地图相关变量
+        let rideMap;
+        let markerBaidu;
+        let polylineBaidu;
+        let pathCoordinates = [];
+        
+        let rideInterval;
+        let startTime;
+        // 福州市中心坐标（东街口附近）
+        let currentPosition = {
+            lat: 26.0745,  
+            lng: 119.2964
+        };
+
+        // 骑行历史记录
+        let rideHistory = [];
+        let currentRideData = [];
+
+        // 新增自定义弹窗功能
+        function showAlert(message, isConfirm = false) {
+            const alertBox = document.getElementById('customAlert');
+            const contentDiv = document.getElementById('alertContent');
+            
+            // 基础内容
+            contentDiv.innerHTML = message.replace(/\n/g, '<br>');
+            
+            // 如果是确认对话框
+            if(isConfirm) {
+                contentDiv.innerHTML += `
+                    <div style="margin-top:20px;">
+                        <button onclick="handleConfirm(true)" 
+                                style="background:#00b894;color:white;">确定</button>
+                        <button onclick="handleConfirm(false)" 
+                                style="background:#ff7675;color:white;">取消</button>
+                    </div>
+                `;
+            } else {
+                contentDiv.innerHTML += `
+                    <button onclick="document.getElementById('customAlert').style.display='none'" 
+                            style="margin-top:15px;background:#74b9ff;">
+                        确定
+                    </button>
+                `;
+            }
+            
+            alertBox.style.display = 'block';
+        }
+
+        function handleConfirm(result) {
+            document.getElementById('customAlert').style.display = 'none';
+            if(result) {
+                // 执行确认操作
+                rideHistory = [];
+                updateButtonStates();
+                showAlert('骑行记录已清除');
+            }
+        }
+
+        // 模拟骑行
+        function simulateRide() {
+            const now = Date.now();
+            const elapsed = (now - startTime) / 1000;
+            // 获取速度设置值
+            const speedSetting = parseInt(document.getElementById('speedBike').value) || 50;
+            const baseSpeed = speedSetting / 20; // 转换为合适的速度系数
+            
+            // 运动参数计算
+            const distance = elapsed * baseSpeed;
+            const speed = baseSpeed + (Math.random() - 0.5);
+
+            // 更新位置（模拟在福州市区移动）
+            currentPosition.lat += (Math.random() - 0.5) * 0.0005;
+            currentPosition.lng += (Math.random() - 0.3) * 0.0005;
+
+            // 更新地图
+            try {
+                const newPoint = new BMap.Point(currentPosition.lng, currentPosition.lat);
+                markerBaidu.setPosition(newPoint);
+                pathCoordinates.push(newPoint);
+                
+                // 更新路径
+                polylineBaidu.setPath(pathCoordinates);
+                
+                // 如果开启画面跟随
+                if(document.getElementById('follow').checked) {
+                    rideMap.setCenter(newPoint);
+                }
+            } catch (e) {
+                console.error('地图更新异常:', e);
+            }
+
+            updateDisplay(elapsed, distance, speed);
+            
+            // 记录本次骑行数据
+            currentRideData.push({
+                time: elapsed,
+                speed: speed
+            });
+        }
+
+        function updateDisplay(duration, distance, speed) {
+            document.getElementById('duration').textContent = Math.floor(duration);
+            document.getElementById('distance').textContent = distance.toFixed(2);
+            document.getElementById('speed').textContent = speed.toFixed(2);
+            document.getElementById('location').textContent = 
+                `${currentPosition.lat.toFixed(4)}, ${currentPosition.lng.toFixed(4)}`;
+        }
+
+        function startRide() {
+            // 重置所有状态
+            clearInterval(rideInterval);
+            pathCoordinates = [];
+            currentRideData = [];
+            startTime = Date.now();
+            // 重置为福州初始位置
+            currentPosition = { lat: 26.0745, lng: 119.2964 };
+            
+            // 初始化骑行地图
+            rideMap = new BMap.Map("ride-map");
+            rideMap.centerAndZoom(new BMap.Point(currentPosition.lng, currentPosition.lat), 16);
+            rideMap.enableScrollWheelZoom();
+            rideMap.addControl(new BMap.NavigationControl());
+            
+            // 设置地图模式
+            const mapMode = document.getElementById('mapMode').value;
+            setMapMode(mapMode);
+            
+            // 修改图标URL为可靠的矢量图链接
+            const bikeIcon = new BMap.Icon(
+                'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIj48cGF0aCBkPSJNMjU2IDBDMTE0LjYgMCAwIDExNC42IDAgMjU2czExNC42IDI1NiAyNTYgMjU2IDI1Ni0xMTQuNiAyNTYtMjU2UzM5Ny40IDAgMjU2IDB6bS0zMiAzNjguOEwxNDQgMjg4bDMyLTMyaDk2bC00OCA2NGg0OGwtMzIgNDh6bTk2LTEyLjhsLTMuMi00LjggMTIuOC0xNiA0OCA2NC0yNCAzMi0xNi0xNnptMTI4LTE5LjJsLTE5LjItMjguOCA0OC02NCAyNCAzMi0xNiAxNnptLTY0LTEyOGwtMzItNDggNDgtNjQgMzIgNDh6bTk2IDk2bC0zMi00OCA0OC02NCAzMiA0OHoiIGZpbGw9IiMwMDdiZmYiLz48L3N2Zz4=',
+                new BMap.Size(15, 15), 
+                { anchor: new BMap.Size(18, 36) }
+            );
+            markerBaidu = new BMap.Marker(
+                new BMap.Point(currentPosition.lng, currentPosition.lat), 
+                { icon: bikeIcon }
+            );
+            rideMap.addOverlay(markerBaidu);
+
+            // 初始化轨迹线
+            polylineBaidu = new BMap.Polyline([], {
+                strokeColor: "#00b894",
+                strokeWeight: 4,
+                strokeOpacity: 0.8
+            });
+            rideMap.addOverlay(polylineBaidu);
+
+            // 立即更新初始状态
+            updateDisplay(0, 0, 0);
+            
+            // 启动定时器
+            document.getElementById('startBtn').disabled = true;
+            document.getElementById('endBtn').disabled = false;
+            document.getElementById('historyBtn').disabled = true;
+            document.getElementById('clearHistoryBtn').disabled = true;
+            document.getElementById('exportBtn').disabled = true;
+            rideInterval = setInterval(simulateRide, 1000);
+      
+        }
+
+        // 添加福州市区地标
+        function addFuzhouLandmarks() {
+            const landmarks = [
+                {name: "东街口", point: new BMap.Point(119.2964, 26.0745)},
+                {name: "三坊七巷", point: new BMap.Point(119.2912, 26.0817)},
+                {name: "福州站", point: new BMap.Point(119.3065, 26.1089)},
+                {name: "五一广场", point: new BMap.Point(119.2992, 26.0718)},
+                {name: "福州大学", point: new BMap.Point(119.1874, 26.0613)}
+            ];
+            
+            landmarks.forEach(landmark => {
+                const marker = new BMap.Marker(landmark.point);
+                const label = new BMap.Label(landmark.name, {
+                    offset: new BMap.Size(15, -10)
+                });
+                marker.setLabel(label);
+                rideMap.addOverlay(marker);
+            });
+        }
+
+        function endRide() {
+            clearInterval(rideInterval);
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('endBtn').disabled = true;
+            document.getElementById('historyBtn').disabled = false;
+            document.getElementById('clearHistoryBtn').disabled = false;
+            document.getElementById('exportBtn').disabled = false;
+            
+            const finalDuration = (Date.now() - startTime) / 1000;
+            const finalDistance = parseFloat(document.getElementById('distance').textContent);
+            
+            // 记录骑行历史
+            rideHistory.push({
+                duration: finalDuration,
+                distance: finalDistance,
+                timestamp: new Date().toLocaleString()
+            });
+            
+            alert(`骑行结束！\n时长：${finalDuration.toFixed(1)}秒\n距离：${finalDistance}米`);
+        }
+
+        // 显示骑行历史
+        function showRideHistory() {
+            if (rideHistory.length === 0) {
+                showAlert('暂无骑行记录');
+                return;
+            }
+            
+            let historyHtml = `<div style="text-align:left;">
+                <h3 style="margin-bottom:15px;">骑行历史（共${rideHistory.length}条）</h3>`;
+            
+            rideHistory.forEach((ride, index) => {
+                historyHtml += `
+                    <div style="margin-bottom:15px;padding:10px;background:#f8f9fa;border-radius:8px;">
+                        <div>🚴 第${index + 1}次骑行</div>
+                        <div>⏱️ ${ride.timestamp}</div>
+                        <div>⏳ 时长：${ride.duration.toFixed(1)}秒</div>
+                        <div>📏 距离：${ride.distance.toFixed(2)}米</div>
+                    </div>
+                `;
+            });
+            
+            historyHtml += `</div>`;
+            showAlert(historyHtml);
+        }
+
+        // 清除骑行历史
+        function clearRideHistory() {
+            if (rideHistory.length === 0) {
+                showAlert('暂无骑行记录可清除');
+                return;
+            }
+            
+            showAlert(
+                `<div style="font-size:16px;margin-bottom:15px;">
+                    ❗ 确定要清除所有骑行记录吗？
+                </div>
+                <div style="color:#888;font-size:14px;">
+                    （共${rideHistory.length}条记录将被永久删除）
+                </div>`,
+                true // 标记为确认对话框
+            );
+        }
+
+        function updateButtonStates() {
+            const hasHistory = rideHistory.length > 0;
+            document.getElementById('historyBtn').disabled = !hasHistory;
+            document.getElementById('clearHistoryBtn').disabled = !hasHistory;
+            document.getElementById('exportBtn').disabled = !hasHistory;
+        }
+
+        // 导出骑行数据
+        function exportRideData() {
+            if (rideHistory.length === 0) {
+                alert('暂无骑行记录可导出');
+                return;
+            }
+            
+            const dataStr = JSON.stringify(rideHistory, null, 2);
+            const blob = new Blob([dataStr], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = 'ride_history.json';
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+        }
+
+        // 切换地图模式
+        function toggleMap() {
+            const mapElement = document.getElementById('ride-map');
+            if (mapElement.style.height === '600px') {
+                mapElement.style.height = '350px';
+            } else {
+                mapElement.style.height = '600px';
+            }
+        }
+
+        // 切换主题
+        function toggleTheme() {
+            document.body.classList.toggle('dark-mode');
+        }
+
+        // 设置地图模式
+        function setMapMode(mode) {
+            switch(mode) {
+                case 'normal':
+                    rideMap.setMapType(BMAP_NORMAL_MAP);
+                    break;
+                case 'satellite':
+                    rideMap.setMapType(BMAP_SATELLITE_MAP);
+                    break;
+                case 'traffic':
+                    rideMap.setMapType(BMAP_TRAFFIC_MAP);
+                    break;
+            }
+        }
+
+        // 初始化地图
+        window.onload = function() {
+            rideMap = new BMap.Map("ride-map");
+            rideMap.centerAndZoom(new BMap.Point(119.2964, 26.0745), 14);
+            rideMap.enableScrollWheelZoom();
+            rideMap.addControl(new BMap.NavigationControl());
+            addFuzhouLandmarks();
+            updateDisplay(0, 0, 0);
+            
+            // 初始化按钮状态
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('endBtn').disabled = true;
+            document.getElementById('historyBtn').disabled = true;
+            document.getElementById('clearHistoryBtn').disabled = true;
+            document.getElementById('exportBtn').disabled = true;
+            
+            // 初始化地图模式选择器
+            document.getElementById('mapMode').addEventListener('change', function() {
+                if (rideMap) {
+                    setMapMode(this.value);
+                }
+            });
+            
+            // 初始化地图切换按钮
+            document.getElementById('toggleMapBtn').addEventListener('click', toggleMap);
+            
+            // 初始化主题切换按钮
+            document.getElementById('toggleThemeBtn').addEventListener('click', toggleTheme);
+        };
+        function returnBike() {
+    if (rideInterval) {
+        clearInterval(rideInterval);
+        document.getElementById('startBtn').disabled = false;
+        document.getElementById('endBtn').disabled = true;
+        
+        const finalDuration = (Date.now() - startTime) / 1000;
+        const finalDistance = parseFloat(document.getElementById('distance').textContent);
+        
+        rideHistory.push({
+            duration: finalDuration,
+            distance: finalDistance,
+            timestamp: new Date().toLocaleString()
+        });
+    } else {
+        // 如果没有骑行，则记录一个还车点
+        rideHistory.push({
+            duration: 0,
+            distance: 0,
+            timestamp: new Date().toLocaleString()
+        });
+    }
+    
+    alert(`您已还车！`);
+    updateButtonStates();
+    resetRideDisplay();
+}
+
+function endRide() {
+    if (!rideInterval) {
+        alert('当前未处于骑行状态，请先开始骑行');
+        return;
+    }
+    clearInterval(rideInterval);
+    document.getElementById('startBtn').disabled = false;
+    document.getElementById('endBtn').disabled = true;
+    
+    const finalDuration = (Date.now() - startTime) / 1000;
+    const finalDistance = parseFloat(document.getElementById('distance').textContent);
+    
+    rideHistory.push({
+        duration: finalDuration,
+        distance: finalDistance,
+        timestamp: new Date().toLocaleString()
+    });
+    
+    alert(`骑行结束！\n时长：${finalDuration.toFixed(1)}秒\n距离：${finalDistance}米`);
+    updateButtonStates();
+    resetRideDisplay();
+}
+
+function resetRideDisplay() {
+    updateDisplay(0, 0, 0);
+    currentPosition = { lat: 26.0745, lng: 119.2964 };
+    markerBaidu.setPosition(new BMap.Point(currentPosition.lng, currentPosition.lat));
+    pathCoordinates = [];
+    polylineBaidu.setPath(pathCoordinates);
+    
+    // 解决问题的关键：在骑行结束后，仍然保持“前往还车”按钮可用
+    document.getElementById('returnBtn').disabled = false;
+}
+
+function updateButtonStates() {
+    const hasHistory = rideHistory.length > 0;
+    document.getElementById('historyBtn').disabled = !hasHistory;
+    document.getElementById('clearHistoryBtn').disabled = !hasHistory;
+    document.getElementById('exportBtn').disabled = !hasHistory;
+    
+    // 始终保持“前往还车”按钮可用
+    document.getElementById('returnBtn').disabled = false;
+}
+    </script>
+</body>
+</html>
